@@ -19,6 +19,13 @@
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     --r:16px;
   }
+  [data-theme="light"]{
+    --bg:#F5F0E8; --surface:#FFFAF3; --surface-2:#EDE7DA;
+    --border:rgba(0,0,0,.1); --ink:#2C2A26; --muted:#7A7568;
+    --accent:#B8784A; --good:#3D9B6F; --warn:#C9A048; --over:#C95555;
+  }
+  [data-theme="light"] input[type=date],[data-theme="light"] input[type=text],
+  [data-theme="light"] input[type=number],[data-theme="light"] select{color-scheme:light}
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
   body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.45;
     padding:env(safe-area-inset-top) 0 calc(40px + env(safe-area-inset-bottom));-webkit-font-smoothing:antialiased}
@@ -71,6 +78,7 @@
   .meta-row{display:flex;gap:10px;margin-bottom:10px}
   .meta-row > div{flex:1;min-width:0}
   .meta-row label{display:block;font-size:11px;color:var(--muted);margin-bottom:5px;letter-spacing:.3px}
+  @media(max-width:400px){.meta-row{flex-direction:column;gap:8px}}
   input[type=date],input[type=text],input[type=number],select{
     background:var(--surface-2);border:1px solid var(--border);border-radius:10px;color:var(--ink);
     padding:10px 12px;font-family:var(--sans);font-size:14px;outline:none;width:100%;color-scheme:dark}
@@ -136,6 +144,24 @@
   .danger{background:none;border:1px solid var(--over);color:var(--over);border-radius:10px;padding:11px;width:100%;cursor:pointer;font-size:14px}
   .ghost{background:var(--surface);border:1px solid var(--border);color:var(--ink);border-radius:10px;padding:11px;cursor:pointer;font-size:14px;flex:1}
   .close-x{position:sticky;top:0;float:right;background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer}
+  /* ---------- TOGGLE SWITCH ---------- */
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;background:var(--surface);
+    border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:8px}
+  .toggle-row span{font-size:14px}
+  .toggle{position:relative;width:44px;height:24px;flex:0 0 auto}
+  .toggle input{opacity:0;width:0;height:0}
+  .toggle .slider{position:absolute;inset:0;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:12px;cursor:pointer;transition:.2s}
+  .toggle .slider::before{content:'';position:absolute;width:18px;height:18px;left:2px;top:2px;
+    background:var(--muted);border-radius:50%;transition:.2s}
+  .toggle input:checked+.slider{background:var(--accent);border-color:var(--accent)}
+  .toggle input:checked+.slider::before{transform:translateX(20px);background:#fff}
+
+  /* ---------- BARRAS EMPILHADAS ---------- */
+  .barcol .bar-stack{width:100%;max-width:26px;border-radius:5px 5px 0 0;overflow:hidden;display:flex;flex-direction:column-reverse;min-height:3px}
+  .barcol .bar-seg{width:100%;min-height:1px;transition:height .4s}
+  .barcol.zero .bar-stack{background:var(--surface-2)}
+
   @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -144,7 +170,10 @@
 
   <header>
     <div class="brand"><b>Controle de Gastos</b><small>controle pessoal</small></div>
-    <button class="icon-btn" id="openSettings" aria-label="Configurações">⚙</button>
+    <div style="display:flex;gap:8px">
+      <button class="icon-btn" id="themeToggle" aria-label="Alternar tema">☀</button>
+      <button class="icon-btn" id="openSettings" aria-label="Configurações">⚙</button>
+    </div>
   </header>
 
   <div class="monthnav">
@@ -232,10 +261,16 @@
 
     <div class="grp">
       <label>Cidades</label>
-      <div class="cat-list" id="cityListSettings"></div>
-      <div class="add-cat">
-        <input type="text" id="newCity" placeholder="Nova cidade" autocomplete="off">
-        <button class="btn" id="addCity">Criar</button>
+      <div class="toggle-row">
+        <span>Habilitar seleção de cidade</span>
+        <label class="toggle"><input type="checkbox" id="cityEnabled"><span class="slider"></span></label>
+      </div>
+      <div id="citySettingsContent">
+        <div class="cat-list" id="cityListSettings" style="margin-top:10px"></div>
+        <div class="add-cat">
+          <input type="text" id="newCity" placeholder="Nova cidade" autocomplete="off">
+          <button class="btn" id="addCity">Criar</button>
+        </div>
       </div>
     </div>
 
@@ -292,10 +327,11 @@ function load(){
       s.categories = s.categories || DEFAULT_CATEGORIES.slice();
       s.cities     = s.cities     || DEFAULT_CITIES.slice();   // migração: versões antigas não tinham cidades
       s.caps       = s.caps       || {weekly:null, monthly:null};
+      if(s.cityEnabled===undefined) s.cityEnabled=true;
       return s;
     }
   }catch(e){ console.error('Falha ao ler dados salvos:', e); }
-  return { expenses:[], categories:DEFAULT_CATEGORIES.slice(), cities:DEFAULT_CITIES.slice(), caps:{weekly:null, monthly:null} };
+  return { expenses:[], categories:DEFAULT_CATEGORIES.slice(), cities:DEFAULT_CITIES.slice(), caps:{weekly:null, monthly:null}, cityEnabled:true };
 }
 function save(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){ console.error('Falha ao salvar:', e); } }
 
@@ -332,6 +368,8 @@ function render(){
   renderPeriod(); renderStatus(); renderChips(); renderCitySelect();
   renderDonut(); renderByCity(); renderBars(); renderList();
   document.getElementById('curSym').textContent = fmt(0).replace(/[\d.,\s]/g,'') || '€';
+  const cityField = document.getElementById('city').closest('.meta-row > div');
+  if(cityField) cityField.style.display = state.cityEnabled ? '' : 'none';
 }
 function renderPeriod(){
   document.getElementById('periodLabel').textContent = viewDate.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
@@ -425,6 +463,9 @@ function renderDonut(){
 // resumo horizontal por cidade (mês atual)
 function renderByCity(){
   const box=document.getElementById('cityList'); box.innerHTML='';
+  const section=box.closest('.charts > div');
+  if(!state.cityEnabled){ section.style.display='none'; return; }
+  section.style.display='';
   const month=state.expenses.filter(e=>inViewMonth(e.date));
   if(month.length===0){ box.innerHTML='<div class="empty">Sem gastos neste mês.</div>'; return; }
   const by={}; month.forEach(e=>{ const c=e.city||'Sem cidade'; by[c]=(by[c]||0)+e.amount; });
@@ -441,12 +482,25 @@ function renderByCity(){
 function renderBars(){
   const box=document.getElementById('bars'); box.innerHTML='';
   const days=[]; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); days.push(d); }
-  const totals=days.map(d=>{ const iso=isoLocal(d); return sum(state.expenses.filter(e=>e.date===iso)); });
-  const max=Math.max(...totals,1);
+  const dayData=days.map(d=>{
+    const iso=isoLocal(d), exps=state.expenses.filter(e=>e.date===iso);
+    const byCat={}; exps.forEach(e=>byCat[e.category]=(byCat[e.category]||0)+e.amount);
+    return {total:sum(exps), byCat};
+  });
+  const max=Math.max(...dayData.map(d=>d.total),1);
   days.forEach((d,i)=>{
-    const col=document.createElement('div'); col.className='barcol'+(totals[i]===0?' zero':'');
-    const h=Math.max((totals[i]/max)*100,2), wd=d.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.','');
-    col.innerHTML=`<i style="height:${h}%" title="${fmt(totals[i])}"></i><small>${wd}</small>`;
+    const col=document.createElement('div'); col.className='barcol'+(dayData[i].total===0?' zero':'');
+    const h=Math.max((dayData[i].total/max)*100,2);
+    const wd=d.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.','');
+    let segs='';
+    if(dayData[i].total>0){
+      const entries=Object.entries(dayData[i].byCat).sort((a,b)=>b[1]-a[1]);
+      entries.forEach(([cat,val])=>{
+        const segH=(val/dayData[i].total)*100;
+        segs+=`<div class="bar-seg" style="height:${segH}%;background:${catColor(cat)}" title="${cat}: ${fmt(val)}"></div>`;
+      });
+    }
+    col.innerHTML=`<div class="bar-stack" style="height:${h}%" title="${fmt(dayData[i].total)}">${segs}</div><small>${wd}</small>`;
     box.appendChild(col);
   });
 }
@@ -480,7 +534,8 @@ function addExpense(){
   if(!amount||amount<=0){ hint.textContent='Digite um valor maior que zero.'; return; }
   if(!selectedCat){ hint.textContent='Escolha uma categoria.'; return; }
   hint.textContent='';
-  state.expenses.push({ id:Date.now(), amount, category:selectedCat, city:selectedCity, date, note });
+  const city = state.cityEnabled ? selectedCity : null;
+  state.expenses.push({ id:Date.now(), amount, category:selectedCat, city, date, note });
   save();
   document.getElementById('amount').value=''; document.getElementById('note').value='';
   viewDate = parseDate(date); viewDate.setDate(1);   // mostra o mês do gasto recém-lançado
@@ -492,12 +547,18 @@ function deleteExpense(id){ state.expenses=state.expenses.filter(e=>e.id!==id); 
 function openSettings(){
   document.getElementById('capWeek').value  = state.caps.weekly  ?? '';
   document.getElementById('capMonth').value = state.caps.monthly ?? '';
+  document.getElementById('cityEnabled').checked = state.cityEnabled;
+  updateCitySettingsVisibility();
   renderCatListSettings(); renderCityListSettings();
   document.getElementById('overlay').classList.add('open');
+}
+function updateCitySettingsVisibility(){
+  document.getElementById('citySettingsContent').style.display = document.getElementById('cityEnabled').checked ? '' : 'none';
 }
 function closeSettings(){
   state.caps.weekly  = parseFloat(document.getElementById('capWeek').value)  || null;
   state.caps.monthly = parseFloat(document.getElementById('capMonth').value) || null;
+  state.cityEnabled  = document.getElementById('cityEnabled').checked;
   save(); document.getElementById('overlay').classList.remove('open'); render();
 }
 function renderCatListSettings(){
@@ -570,6 +631,20 @@ document.getElementById('exportBtn').onclick = exportData;
 document.getElementById('importBtn').onclick = ()=>document.getElementById('importFile').click();
 document.getElementById('importFile').onchange = e=>{ if(e.target.files[0]) importData(e.target.files[0]); };
 document.getElementById('clearBtn').onclick = clearAll;
+document.getElementById('cityEnabled').onchange = updateCitySettingsVisibility;
+
+// tema claro/escuro
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('themeToggle').textContent = t==='light' ? '🌙' : '☀';
+  document.querySelector('meta[name="theme-color"]').content = t==='light' ? '#F5F0E8' : '#15171C';
+  localStorage.setItem('theme', t);
+}
+document.getElementById('themeToggle').onclick = ()=>{
+  const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  applyTheme(cur==='dark' ? 'light' : 'dark');
+};
+applyTheme(localStorage.getItem('theme') || 'dark');
 
 render();
 </script>
