@@ -39,12 +39,17 @@ function load(){
       if(s.cities.length && typeof s.cities[0]==='string'){
         s.cities=s.cities.map((c,i)=>({name:c, color:PALETTE[i%PALETTE.length]}));
       }
-      s.caps       = s.caps       || {weekly:null, monthly:null};
-      if(s.cityEnabled===undefined) s.cityEnabled=true;
+      s.caps              = s.caps              || {weekly:null, monthly:null};
+      if(s.cityEnabled===undefined)       s.cityEnabled=true;
+      if(s.notifBudget===undefined)       s.notifBudget=true;
+      if(s.notifDailySummary===undefined) s.notifDailySummary=false;
+      if(s.notifDailyTime===undefined)    s.notifDailyTime='21:00';
       return s;
     }
   }catch(e){ console.error('Falha ao ler dados salvos:', e); }
-  return { expenses:[], categories:DEFAULT_CATEGORIES.slice(), cities:DEFAULT_CITIES.map(c=>({...c})), caps:{weekly:null, monthly:null}, cityEnabled:true };
+  return { expenses:[], categories:DEFAULT_CATEGORIES.slice(), cities:DEFAULT_CITIES.map(c=>({...c})),
+    caps:{weekly:null, monthly:null}, cityEnabled:true,
+    notifBudget:true, notifDailySummary:false, notifDailyTime:'21:00' };
 }
 
 function save(){
@@ -93,6 +98,73 @@ const sum = arr => arr.reduce((a,b)=>a+b.amount, 0);
 const catColor = name => (state.categories.find(c=>c.name===name)||{}).color || 'var(--muted)';
 const cityColor = name => (state.cities.find(c=>c.name===name)||{}).color || 'var(--accent)';
 const escapeHtml = s => s.replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* =========================================================
+   NOTIFICACOES
+   ========================================================= */
+const notifSupported = 'Notification' in window;
+
+function notifPermission(){ return notifSupported ? Notification.permission : 'unsupported'; }
+
+async function requestNotifPermission(){
+  if(!notifSupported) return false;
+  if(Notification.permission==='granted') return true;
+  const r = await Notification.requestPermission();
+  renderNotifStatus();
+  return r==='granted';
+}
+
+function sendNotif(title, body){
+  if(notifPermission()!=='granted') return;
+  new Notification(title, { body, icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text y="52" font-size="52">💸</text></svg>' });
+}
+
+function checkBudgetNotif(){
+  if(!state.notifBudget || notifPermission()!=='granted') return;
+  const today = isoLocal(new Date());
+  const lastKey = 'lastBudgetNotifDate';
+  if(localStorage.getItem(lastKey)===today) return;
+
+  const weekSpent  = sum(state.expenses.filter(e=>inCurrentWeek(e.date)));
+  const monthSpent = sum(state.expenses.filter(e=>{
+    const d=parseDate(e.date), n=new Date();
+    return d.getFullYear()===n.getFullYear() && d.getMonth()===n.getMonth();
+  }));
+
+  if(state.caps.weekly && weekSpent>=state.caps.weekly){
+    sendNotif('Teto semanal atingido 🔴', `Você gastou ${fmt(weekSpent)} esta semana (limite: ${fmt(state.caps.weekly)})`);
+    localStorage.setItem(lastKey, today);
+  } else if(state.caps.monthly && monthSpent>=state.caps.monthly){
+    sendNotif('Teto mensal atingido 🔴', `Você gastou ${fmt(monthSpent)} este mês (limite: ${fmt(state.caps.monthly)})`);
+    localStorage.setItem(lastKey, today);
+  }
+}
+
+function checkDailySummary(){
+  if(!state.notifDailySummary || notifPermission()!=='granted') return;
+  const now = new Date();
+  const today = isoLocal(now);
+  if(localStorage.getItem('lastDailySummaryDate')===today) return;
+  const [h,m] = state.notifDailyTime.split(':').map(Number);
+  if(now.getHours()>h || (now.getHours()===h && now.getMinutes()>=m)){
+    const todaySpent = sum(state.expenses.filter(e=>e.date===today));
+    sendNotif('Resumo do dia 📊', todaySpent>0
+      ? `Você gastou ${fmt(todaySpent)} hoje`
+      : 'Nenhum gasto registrado hoje');
+    localStorage.setItem('lastDailySummaryDate', today);
+  }
+}
+
+function renderNotifStatus(){
+  const el = document.getElementById('notifStatus');
+  if(!el) return;
+  if(!notifSupported){ el.textContent='Não suportado neste navegador'; el.className='notif-status unsupported'; return; }
+  const p = notifPermission();
+  if(p==='granted'){  el.textContent='Ativadas'; el.className='notif-status granted'; }
+  else if(p==='denied'){ el.textContent='Bloqueadas pelo navegador — libere nas configurações do browser'; el.className='notif-status denied'; }
+  else { el.textContent='Permissão não concedida'; el.className='notif-status pending'; }
+  document.getElementById('notifRequestBtn').style.display = p==='granted' ? 'none' : '';
+}
 
 /* =========================================================
    RENDER
@@ -292,6 +364,7 @@ function addExpense(){
   document.getElementById('amount').value=''; document.getElementById('note').value='';
   viewDate = parseDate(date); viewDate.setDate(1);
   render();
+  checkBudgetNotif();
 }
 
 function deleteExpense(id){ state.expenses=state.expenses.filter(e=>e.id!==id); save(); render(); }
@@ -304,7 +377,12 @@ let pickedCatColor=PALETTE[0], pickedCityColor=PALETTE[0];
 function openSettings(){
   document.getElementById('capWeek').value  = state.caps.weekly  ?? '';
   document.getElementById('capMonth').value = state.caps.monthly ?? '';
-  document.getElementById('cityEnabled').checked = state.cityEnabled;
+  document.getElementById('cityEnabled').checked      = state.cityEnabled;
+  document.getElementById('notifBudget').checked      = state.notifBudget;
+  document.getElementById('notifDailySummary').checked = state.notifDailySummary;
+  document.getElementById('notifDailyTime').value     = state.notifDailyTime;
+  updateNotifTimeVisibility();
+  renderNotifStatus();
   updateCitySettingsVisibility();
   pickedCatColor=PALETTE[state.categories.length%PALETTE.length];
   pickedCityColor=PALETTE[state.cities.length%PALETTE.length];
@@ -320,10 +398,18 @@ function updateCitySettingsVisibility(){
 }
 
 function closeSettings(){
-  state.caps.weekly  = parseFloat(document.getElementById('capWeek').value)  || null;
-  state.caps.monthly = parseFloat(document.getElementById('capMonth').value) || null;
-  state.cityEnabled  = document.getElementById('cityEnabled').checked;
+  state.caps.weekly        = parseFloat(document.getElementById('capWeek').value)  || null;
+  state.caps.monthly       = parseFloat(document.getElementById('capMonth').value) || null;
+  state.cityEnabled        = document.getElementById('cityEnabled').checked;
+  state.notifBudget        = document.getElementById('notifBudget').checked;
+  state.notifDailySummary  = document.getElementById('notifDailySummary').checked;
+  state.notifDailyTime     = document.getElementById('notifDailyTime').value || '21:00';
   save(); document.getElementById('overlay').classList.remove('open'); render();
+}
+
+function updateNotifTimeVisibility(){
+  document.getElementById('notifTimeRow').style.display =
+    document.getElementById('notifDailySummary').checked ? '' : 'none';
 }
 
 function renderCatListSettings(){
@@ -456,6 +542,8 @@ document.getElementById('importBtn').onclick = ()=>document.getElementById('impo
 document.getElementById('importFile').onchange = e=>{ if(e.target.files[0]) importData(e.target.files[0]); };
 document.getElementById('clearBtn').onclick = clearAll;
 document.getElementById('cityEnabled').onchange = updateCitySettingsVisibility;
+document.getElementById('notifRequestBtn').onclick = requestNotifPermission;
+document.getElementById('notifDailySummary').onchange = updateNotifTimeVisibility;
 
 document.getElementById('themeToggle').onclick = ()=>{
   const cur = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -466,5 +554,9 @@ applyTheme(localStorage.getItem('theme') || 'dark');
 document.getElementById('fontUp').onclick = ()=>{ if(fontIdx<FONT_STEPS.length-1){fontIdx++;applyFontSize();} };
 document.getElementById('fontDown').onclick = ()=>{ if(fontIdx>0){fontIdx--;applyFontSize();} };
 applyFontSize();
+
+// checagem de resumo diário a cada minuto
+checkDailySummary();
+setInterval(checkDailySummary, 60_000);
 
 render();

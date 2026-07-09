@@ -125,6 +125,26 @@
     </div>
 
     <div class="grp">
+      <label>Notificações</label>
+      <div class="notif-permission-row">
+        <span id="notifStatus" class="notif-status pending">—</span>
+        <button class="ghost" id="notifRequestBtn" style="flex:0 0 auto">Ativar</button>
+      </div>
+      <div class="toggle-row" style="margin-top:10px">
+        <span>Avisar ao ultrapassar teto</span>
+        <label class="toggle"><input type="checkbox" id="notifBudget"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row" style="margin-top:8px">
+        <span>Resumo diário de gastos</span>
+        <label class="toggle"><input type="checkbox" id="notifDailySummary"><span class="slider"></span></label>
+      </div>
+      <div id="notifTimeRow" class="notif-time-row">
+        <span style="font-size:13px;color:var(--muted)">Horário do resumo</span>
+        <input type="time" id="notifDailyTime" value="21:00" style="width:auto;padding:6px 10px">
+      </div>
+    </div>
+
+    <div class="grp">
       <label>Backup dos dados</label>
       <div style="display:flex;gap:10px">
         <button class="ghost" id="exportBtn">Exportar (.json)</button>

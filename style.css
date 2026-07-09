@@ -161,4 +161,15 @@ input:focus,select:focus{border-color:var(--accent)}
 .barcol .bar-seg{width:100%;min-height:1px;transition:height .4s}
 .barcol.zero .bar-stack{background:var(--surface-2)}
 
+/* ---------- NOTIFICACOES ---------- */
+.notif-permission-row{display:flex;align-items:center;gap:10px;background:var(--surface);
+  border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-top:8px}
+.notif-status{flex:1;font-size:13px}
+.notif-status.granted{color:var(--good)}
+.notif-status.denied{color:var(--over)}
+.notif-status.pending{color:var(--muted)}
+.notif-status.unsupported{color:var(--muted)}
+.notif-time-row{display:flex;align-items:center;justify-content:space-between;
+  padding:8px 14px;gap:10px;margin-top:6px}
+
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
