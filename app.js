@@ -1,8 +1,20 @@
 /* =========================================================
    CONFIG
    ========================================================= */
-const CONFIG = { LOCALE:'fr-FR', CURRENCY:'EUR' };
 const STORAGE_KEY = 'controle_gastos_v1';
+
+const CURRENCIES = [
+  {code:'EUR', locale:'fr-FR'},
+  {code:'BRL', locale:'pt-BR'},
+  {code:'USD', locale:'en-US'},
+  {code:'GBP', locale:'en-GB'},
+  {code:'CHF', locale:'de-CH'},
+  {code:'JPY', locale:'ja-JP'},
+  {code:'MXN', locale:'es-MX'},
+  {code:'ARS', locale:'es-AR'},
+  {code:'CLP', locale:'es-CL'},
+  {code:'COP', locale:'es-CO'},
+];
 
 const DEFAULT_CATEGORIES = [
   {name:'Restaurante',     color:'#E6B655'},
@@ -40,7 +52,10 @@ function load(){
         s.cities=s.cities.map((c,i)=>({name:c, color:PALETTE[i%PALETTE.length]}));
       }
       s.caps              = s.caps              || {weekly:null, monthly:null};
+      if(s.caps.daily===undefined)        s.caps.daily=null;
       if(s.cityEnabled===undefined)       s.cityEnabled=true;
+      if(s.currency===undefined)          s.currency='EUR';
+      if(!s.visibleCards)                 s.visibleCards={daily:false, weekly:true, monthly:true};
       if(s.notifBudget===undefined)       s.notifBudget=true;
       if(s.notifDailySummary===undefined) s.notifDailySummary=false;
       if(s.notifDailyTime===undefined)    s.notifDailyTime='21:00';
@@ -48,7 +63,8 @@ function load(){
     }
   }catch(e){ console.error('Falha ao ler dados salvos:', e); }
   return { expenses:[], categories:DEFAULT_CATEGORIES.slice(), cities:DEFAULT_CITIES.map(c=>({...c})),
-    caps:{weekly:null, monthly:null}, cityEnabled:true,
+    caps:{weekly:null, monthly:null, daily:null}, cityEnabled:true, currency:'EUR',
+    visibleCards:{daily:false, weekly:true, monthly:true},
     notifBudget:true, notifDailySummary:false, notifDailyTime:'21:00' };
 }
 
@@ -68,8 +84,13 @@ function initCity(){
 /* =========================================================
    UTILITARIOS
    ========================================================= */
-const nf = new Intl.NumberFormat(CONFIG.LOCALE, {style:'currency', currency:CONFIG.CURRENCY});
+let nf = new Intl.NumberFormat('fr-FR', {style:'currency', currency:'EUR'});
 const fmt = v => nf.format(v);
+
+function applyCurrency(){
+  const cur = CURRENCIES.find(c=>c.code===state.currency) || CURRENCIES[0];
+  nf = new Intl.NumberFormat(cur.locale, {style:'currency', currency:cur.code});
+}
 
 function isoLocal(d){
   const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
@@ -125,13 +146,17 @@ function checkBudgetNotif(){
   const lastKey = 'lastBudgetNotifDate';
   if(localStorage.getItem(lastKey)===today) return;
 
+  const daySpent   = sum(state.expenses.filter(e=>e.date===today));
   const weekSpent  = sum(state.expenses.filter(e=>inCurrentWeek(e.date)));
   const monthSpent = sum(state.expenses.filter(e=>{
     const d=parseDate(e.date), n=new Date();
     return d.getFullYear()===n.getFullYear() && d.getMonth()===n.getMonth();
   }));
 
-  if(state.caps.weekly && weekSpent>=state.caps.weekly){
+  if(state.caps.daily && daySpent>=state.caps.daily){
+    sendNotif('Teto diário atingido 🔴', `Você gastou ${fmt(daySpent)} hoje (limite: ${fmt(state.caps.daily)})`);
+    localStorage.setItem(lastKey, today);
+  } else if(state.caps.weekly && weekSpent>=state.caps.weekly){
     sendNotif('Teto semanal atingido 🔴', `Você gastou ${fmt(weekSpent)} esta semana (limite: ${fmt(state.caps.weekly)})`);
     localStorage.setItem(lastKey, today);
   } else if(state.caps.monthly && monthSpent>=state.caps.monthly){
@@ -190,7 +215,8 @@ function renderPeriod(){
 function changeMonth(delta){ viewDate.setMonth(viewDate.getMonth()+delta); render(); }
 
 function fillCard(prefix, spent, cap, noCapSub){
-  const card=document.getElementById(prefix==='week'?'cardWeek':'cardMonth');
+  const ids={week:'cardWeek', month:'cardMonth', day:'cardDay'};
+  const card=document.getElementById(ids[prefix]);
   const remEl=document.getElementById(prefix+'Remain');
   const subEl=document.getElementById(prefix+'Sub');
   const barEl=document.getElementById(prefix+'Bar');
@@ -208,20 +234,29 @@ function fillCard(prefix, spent, cap, noCapSub){
 }
 
 function renderStatus(){
-  const weekLabel  = document.querySelector('#cardWeek .label');
-  const monthLabel = document.querySelector('#cardMonth .label');
+  const vc = state.visibleCards || {daily:false, weekly:true, monthly:true};
+  const isCurrent = isCurrentMonthView();
+  const today = isoLocal(new Date());
   const monthSpent = sum(state.expenses.filter(e=>inViewMonth(e.date)));
+  const showDay = vc.daily && isCurrent;
 
-  if(isCurrentMonthView()){
-    weekLabel.textContent  = 'Esta semana';
-    monthLabel.textContent = 'Este mês';
-    fillCard('week', sum(state.expenses.filter(e=>inCurrentWeek(e.date))), state.caps.weekly);
-  } else {
-    weekLabel.textContent  = 'Total do mês';
-    monthLabel.textContent = 'vs teto mensal';
-    fillCard('week', monthSpent, null, 'gasto no mês');
+  document.getElementById('cardDay').style.display   = showDay    ? '' : 'none';
+  document.getElementById('cardWeek').style.display  = vc.weekly  ? '' : 'none';
+  document.getElementById('cardMonth').style.display = vc.monthly ? '' : 'none';
+
+  if(showDay){
+    fillCard('day', sum(state.expenses.filter(e=>e.date===today)), state.caps.daily, 'gasto hoje');
   }
-  fillCard('month', monthSpent, state.caps.monthly);
+  if(isCurrent){
+    document.querySelector('#cardWeek .label').textContent  = 'Esta semana';
+    document.querySelector('#cardMonth .label').textContent = 'Este mês';
+    if(vc.weekly) fillCard('week', sum(state.expenses.filter(e=>inCurrentWeek(e.date))), state.caps.weekly);
+  } else {
+    document.querySelector('#cardWeek .label').textContent  = 'Total do mês';
+    document.querySelector('#cardMonth .label').textContent = 'vs teto mensal';
+    if(vc.weekly) fillCard('week', monthSpent, null, 'gasto no mês');
+  }
+  if(vc.monthly) fillCard('month', monthSpent, state.caps.monthly);
 }
 
 function renderChips(){
@@ -375,8 +410,14 @@ function deleteExpense(id){ state.expenses=state.expenses.filter(e=>e.id!==id); 
 let pickedCatColor=PALETTE[0], pickedCityColor=PALETTE[0];
 
 function openSettings(){
+  document.getElementById('capDay').value   = state.caps.daily   ?? '';
   document.getElementById('capWeek').value  = state.caps.weekly  ?? '';
   document.getElementById('capMonth').value = state.caps.monthly ?? '';
+  document.getElementById('currency').value = state.currency || 'EUR';
+  const vc = state.visibleCards || {daily:false, weekly:true, monthly:true};
+  document.getElementById('visDaily').checked   = vc.daily   ?? false;
+  document.getElementById('visWeekly').checked  = vc.weekly  ?? true;
+  document.getElementById('visMonthly').checked = vc.monthly ?? true;
   document.getElementById('cityEnabled').checked      = state.cityEnabled;
   document.getElementById('notifBudget').checked      = state.notifBudget;
   document.getElementById('notifDailySummary').checked = state.notifDailySummary;
@@ -398,12 +439,20 @@ function updateCitySettingsVisibility(){
 }
 
 function closeSettings(){
+  state.caps.daily         = parseFloat(document.getElementById('capDay').value)   || null;
   state.caps.weekly        = parseFloat(document.getElementById('capWeek').value)  || null;
   state.caps.monthly       = parseFloat(document.getElementById('capMonth').value) || null;
+  state.currency           = document.getElementById('currency').value;
+  state.visibleCards = {
+    daily:   document.getElementById('visDaily').checked,
+    weekly:  document.getElementById('visWeekly').checked,
+    monthly: document.getElementById('visMonthly').checked,
+  };
   state.cityEnabled        = document.getElementById('cityEnabled').checked;
   state.notifBudget        = document.getElementById('notifBudget').checked;
   state.notifDailySummary  = document.getElementById('notifDailySummary').checked;
   state.notifDailyTime     = document.getElementById('notifDailyTime').value || '21:00';
+  applyCurrency();
   save(); document.getElementById('overlay').classList.remove('open'); render();
 }
 
@@ -483,8 +532,11 @@ function importData(file){
       if(state.cities.length && typeof state.cities[0]==='string'){
         state.cities=state.cities.map((c,i)=>({name:c, color:PALETTE[i%PALETTE.length]}));
       }
-      state.caps=state.caps||{weekly:null,monthly:null};
-      selectedCity=initCity(); save(); render(); closeSettings();
+      state.caps=state.caps||{weekly:null,monthly:null,daily:null};
+      if(state.caps.daily===undefined) state.caps.daily=null;
+      if(!state.currency) state.currency='EUR';
+      if(!state.visibleCards) state.visibleCards={daily:false,weekly:true,monthly:true};
+      selectedCity=initCity(); applyCurrency(); save(); render(); closeSettings();
     }catch(e){ alert('Não consegui ler esse arquivo. Verifique se é um backup válido.'); }
   };
   r.readAsText(file);
@@ -492,7 +544,7 @@ function importData(file){
 
 function clearAll(){
   if(confirm('Isso apaga todos os gastos e configurações. Continuar?')){
-    localStorage.removeItem(STORAGE_KEY); state=load();
+    localStorage.removeItem(STORAGE_KEY); state=load(); applyCurrency();
     selectedCat=state.categories[0]?.name||null; selectedCity=initCity();
     closeSettings(); render();
   }
@@ -559,4 +611,5 @@ applyFontSize();
 checkDailySummary();
 setInterval(checkDailySummary, 60_000);
 
+applyCurrency();
 render();
